@@ -28,8 +28,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Save, Download } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Plus, Trash2, Save, Download, Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ALL_INSTRUMENTS } from "@/constants/all-data";
 // import {
@@ -46,6 +46,7 @@ interface SelectedOption {
   action: "BUY" | "SELL";
   premium: number;
   quantity: number;
+  expiry: Date;
 }
 
 const StrategyBuilder = () => {
@@ -61,35 +62,67 @@ const StrategyBuilder = () => {
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
   const [optionData, setOptionData] = useState<any[]>([]);
   const [spotPrice, setspotPrice] = useState(0);
-  const [selectedOptions, setSelectedOptions] = useState<unknown[]>([]);
+  const [selectedOptions, setSelectedOptions] = useState<any[]>([]);
+  const [targetStrike, setTargetStrike] = useState("");
 
   //   const instrumentData = instruments[instrument];
   //   const spotPrice = instrumentData.spotPrice;
   //   const optionsChain = generateOptionsChain(instrument, expiry);
 
-  console.log(optionData);
+  // console.log(optionData);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasScrolled = useRef(false);
+
+  useEffect(() => {
+    if (!optionData.length || !spotPrice) return;
+
+    const interval = selectedIndex === "NIFTY" ? 50 : 100;
+    const atmRow = optionData.find(
+      (row) => Math.abs(row.strikePrice - spotPrice) <= interval
+    );
+
+    if (atmRow) {
+      setTargetStrike(atmRow.strikePrice.toString());
+    }
+  }, [optionData, spotPrice, selectedIndex]);
+
+  useEffect(() => {
+    if (!targetStrike || !containerRef.current || hasScrolled.current) return;
+
+    hasScrolled.current = true; // only once per update
+    const container = containerRef.current;
+
+    const targetRow = Array.from(container.querySelectorAll("tr")).find((tr) =>
+      tr.textContent?.includes(targetStrike)
+    ) as HTMLElement | undefined;
+
+    if (targetRow) {
+      targetRow.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [targetStrike]);
 
   const addOption = (
     strike: number,
     type: "CE" | "PE",
     action: "BUY" | "SELL"
   ) => {
-    const optionsData = optionData.find((row) => row.strike === strike);
-    if (!optionsData) return;
+    const data = optionData.find((row) => row.strikePrice === strike);
+    if (!data) return;
 
-    const premium =
-      type === "CE" ? optionsData?.CE.lastPrice : optionsData?.PE.lastPrice;
+    console.log(data);
 
-    console.log(premium);
+    const premium = type === "CE" ? data?.CE.lastPrice : data?.PE.lastPrice;
 
     const newOption: SelectedOption = {
       //   id: `${Date.now()}-${Math.random()}`,
-      id: "hjeabkqwevhfb",
+      id: Math.random().toString(),
       strike,
       type,
       action,
       premium,
       quantity: 1,
+      expiry: data.expiryDate,
     };
 
     setSelectedOptions([...selectedOptions, newOption]);
@@ -185,11 +218,11 @@ const StrategyBuilder = () => {
   //     toast.success(`${templateName} strategy applied`);
   //   };
 
-  console.log(selectedOptions);
+  console.log("selected option", selectedOptions);
 
   const calculateNetPremium = () => {
     return selectedOptions.reduce((sum, opt) => {
-      const premium = opt.premium * opt.quantity * instrumentData.lotSize;
+      const premium = opt.premium * opt.quantity * 50;
       return sum + (opt.action === "BUY" ? -premium : premium);
     }, 0);
   };
@@ -198,6 +231,17 @@ const StrategyBuilder = () => {
     // TODO: Save to backend/local storage
     toast.success("Strategy saved successfully");
   };
+  useEffect(() => {
+    if (optionData.length > 0) {
+      const nearest = optionData.reduce((prev, curr) =>
+        Math.abs(curr.strikePrice - spotPrice) <
+        Math.abs(prev.strikePrice - spotPrice)
+          ? curr
+          : prev
+      );
+      setTargetStrike(nearest.strikePrice);
+    }
+  }, [optionData, spotPrice]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -267,7 +311,7 @@ const StrategyBuilder = () => {
                   </Select>
                 </div>
 
-                {/* <div className="space-y-2">
+                <div className="space-y-2">
                   <Label>Net Premium</Label>
                   <div
                     className={`h-10 px-3 rounded-md border flex items-center font-medium ${
@@ -279,7 +323,7 @@ const StrategyBuilder = () => {
                     {calculateNetPremium() >= 0 ? "+" : ""}₹
                     {Math.abs(calculateNetPremium()).toLocaleString()}
                   </div>
-                </div> */}
+                </div>
 
                 <div className="space-y-2">
                   <Label>Actions</Label>
@@ -314,7 +358,10 @@ const StrategyBuilder = () => {
 
           <div className="grid lg:grid-cols-3 gap-6">
             {/* Options Chain */}
-            <div className="lg:col-span-2">
+            <div
+              className="lg:col-span-2 min-h-96 h-96 max-h-96 overflow-y-auto"
+              ref={containerRef}
+            >
               <Card>
                 <CardHeader>
                   <CardTitle>Options Chain</CardTitle>
@@ -355,61 +402,66 @@ const StrategyBuilder = () => {
                       </TableHeader>
                       <TableBody>
                         {optionData.map((row) => {
-                          const isATM =
-                            Math.abs(row.strike - spotPrice) <=
-                            (selectedIndex === "NIFTY" ? 50 : 100);
+                          const isATM = row.strikePrice === targetStrike;
+
                           const callSelected = selectedOptions.find(
                             (opt) =>
-                              opt.strike === row.strike && opt.type === "CE"
+                              opt.strike === row.strikePrice &&
+                              opt.type === "CE" &&
+                              opt.expiry === selectedExpiry
                           );
                           const putSelected = selectedOptions.find(
                             (opt) =>
-                              opt.strike === row.strike && opt.type === "PE"
+                              opt.strike === row.strikePrice &&
+                              opt.type === "PE" &&
+                              opt.expiry === selectedExpiry
                           );
                           const rowHighlight = callSelected || putSelected;
 
                           return (
                             <TableRow
                               key={row.strikePrice}
-                              className={
-                                isATM
-                                  ? "bg-primary/5"
-                                  : rowHighlight
-                                  ? rowHighlight.action === "BUY"
-                                    ? "bg-success/10"
-                                    : "bg-danger/10"
-                                  : ""
-                              }
+                              className={isATM ? "bg-yellow-200" : ""}
                             >
                               <TableCell
-                                className={
-                                  callSelected
-                                    ? callSelected.action === "BUY"
-                                      ? "bg-success/20"
-                                      : "bg-danger/20"
-                                    : ""
-                                }
+                              // className={
+                              //   callSelected
+                              //     ? callSelected.action === "BUY"
+                              //       ? "bg-green-300"
+                              //       : "bg-red-300"
+                              //     : ""
+                              // }
                               >
                                 <div className="flex gap-1">
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 px-2 text-xs bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                                    className="h-7 px-2 text-xs bg-green-50 hover:bg-green-100 text-green-700 min-w-7 border-green-200 "
                                     onClick={() =>
                                       addOption(row.strikePrice, "CE", "BUY")
                                     }
                                   >
-                                    B
+                                    {callSelected &&
+                                    callSelected.action === "BUY" ? (
+                                      <Check className="absolute" />
+                                    ) : (
+                                      "B"
+                                    )}
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 px-2 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                    className="h-7 min-w-7 px-2 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
                                     onClick={() =>
                                       addOption(row.strikePrice, "CE", "SELL")
                                     }
                                   >
-                                    S
+                                    {callSelected &&
+                                    callSelected.action === "SELL" ? (
+                                      <Check className="absolute" />
+                                    ) : (
+                                      "S"
+                                    )}
                                   </Button>
                                 </div>
                               </TableCell>
@@ -460,35 +512,41 @@ const StrategyBuilder = () => {
                               <TableCell className="text-sm">
                                 {(row.PE.impliedVolatility / 1000).toFixed(0)}K
                               </TableCell>
-                              <TableCell
-                                className={
-                                  putSelected
-                                    ? putSelected.action === "BUY"
-                                      ? "bg-success/20"
-                                      : "bg-danger/20"
-                                    : ""
-                                }
-                              >
+                              <TableCell>
                                 <div className="flex gap-1">
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 px-2 text-xs bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                                    className="h-7 min-w-7 px-2 text-xs bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
                                     onClick={() =>
                                       addOption(row.strikePrice, "PE", "BUY")
                                     }
                                   >
-                                    B
+                                    {putSelected &&
+                                    putSelected.action === "BUY" ? (
+                                      <Check className="absolute" />
+                                    ) : (
+                                      "B"
+                                    )}
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    className="h-7 px-2 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                                    className="h-7 min-w-7 px-2 text-xs bg-red-50 hover:bg-red-100 text-red-700 border-red-200 disabled:opacity-100"
                                     onClick={() =>
                                       addOption(row.strikePrice, "PE", "SELL")
                                     }
+                                    disabled={
+                                      putSelected &&
+                                      putSelected.action === "SELL"
+                                    }
                                   >
-                                    S
+                                    {putSelected &&
+                                    putSelected.action !== "BUY" ? (
+                                      <Check className="absolute " />
+                                    ) : (
+                                      "S"
+                                    )}
                                   </Button>
                                 </div>
                               </TableCell>
@@ -521,15 +579,19 @@ const StrategyBuilder = () => {
                         >
                           <Badge
                             variant={
-                              option.action === "BUY" ? "default" : "secondary"
+                              option.action === "BUY" ? "outline" : "secondary"
                             }
-                            className="text-xs"
+                            className={`text-xs text-white ${
+                              option.action === "BUY"
+                                ? "bg-green-500"
+                                : "bg-red-500"
+                            }`}
                           >
                             {option.action}
                           </Badge>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">
-                              {option.strike} {option.type}
+                              {option.strike} {option.type} {option.expiry}
                             </p>
                             <p className="text-xs text-muted-foreground">
                               ₹{option.premium}
