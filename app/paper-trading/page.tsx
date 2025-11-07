@@ -29,7 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Trash2, TrendingUp, TrendingDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { instruments, generateOptionsChain } from "@/utils/optionsData";
 
@@ -61,13 +61,84 @@ interface StockTrade {
 type Trade = OptionTrade | StockTrade;
 
 const PaperTrading = () => {
+  const [allData, setAllData] = useState<any>();
   const [tradeType, setTradeType] = useState<"option" | "stock">("option");
   const [positions, setPositions] = useState<Trade[]>([]);
   const [orderHistory, setOrderHistory] = useState<Trade[]>([]);
+  const [optionChain, setOptionChain] = useState<any[]>([]);
 
   // Option trading state
   const [selectedInstrument, setSelectedInstrument] = useState("NIFTY");
+  const [instruments, setInstruments] = useState<String[]>([]);
+  const [expiries, setExpiries] = useState<any[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState("");
+
+  useEffect(() => {
+    const getInstruments = async () => {
+      const res = await fetch("/all_indices_tokens.json");
+      const data = await res.json();
+      setAllData(data);
+      setInstruments(Object.keys(data));
+    };
+    getInstruments();
+  }, []);
+
+  useEffect(() => {
+    const allExpiries =
+      allData && allData[selectedInstrument]["CE"].map((d: any) => d.expiry);
+    setSelectedExpiry(
+      Array.from(new Set(allExpiries).keys()).sort()[0] as string
+    );
+    setExpiries(Array.from(new Set(allExpiries).keys()).sort());
+  }, [allData, selectedInstrument]);
+
+  useEffect(() => {
+    if (!allData) return;
+
+    const entries = [
+      ...allData[selectedInstrument]["PE"].map((d: any) => ({
+        ...d,
+        type: "PE",
+      })),
+      ...allData[selectedInstrument]["CE"].map((d: any) => ({
+        ...d,
+        type: "CE",
+      })),
+    ];
+
+    const mergedMap = new Map();
+
+    for (const item of entries) {
+      if (item.expiry !== selectedExpiry) continue;
+
+      const bucket = mergedMap.get(item.strike) || { strike: item.strike };
+
+      if (item.type === "PE") {
+        bucket.PE = item;
+      } else {
+        bucket.CE = item;
+      }
+
+      mergedMap.set(item.strike, bucket);
+    }
+
+    const mergedArray = Array.from(mergedMap.values());
+    mergedArray.sort((a, b) => a.strike - b.strike);
+
+    // pick middle 100
+    const mid = Math.floor(mergedArray.length / 2);
+    const start = Math.max(0, mid - 50);
+    const end = start + 100;
+
+    const middle100 = mergedArray.slice(start, end);
+
+    console.log(middle100);
+    setOptionChain(middle100);
+
+    // If you want the merged one in state, use this:
+    // setOptionChain(mergedArray);
+  }, [selectedExpiry]);
+
   const [quantity, setQuantity] = useState(1);
 
   // Stock trading state
@@ -75,7 +146,17 @@ const PaperTrading = () => {
   const [stockPrice, setStockPrice] = useState("");
   const [stockQuantity, setStockQuantity] = useState(1);
 
-  const instrumentData = instruments[selectedInstrument];
+  const [selectedStrikes, setSelectedStrikes] = useState<
+    {
+      id: string;
+      instrument: string;
+      strike: string;
+      expiry: string;
+      type: "CE" | "PE";
+    }[]
+  >([]);
+
+  // const instrumentData = instruments[selectedInstrument];
   const optionsChain = selectedExpiry
     ? generateOptionsChain(selectedInstrument, selectedExpiry, new Date())
     : [];
@@ -251,31 +332,13 @@ const PaperTrading = () => {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {Object.keys(instruments).map((inst) => (
-                          <SelectItem key={inst} value={inst}>
+                        {instruments.map((inst, index) => (
+                          <SelectItem key={index} value={inst as string}>
                             {inst}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Spot Price</Label>
-                      <Input value={`₹${instrumentData.spotPrice}`} disabled />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Quantity</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={quantity}
-                        onChange={(e) =>
-                          setQuantity(parseInt(e.target.value) || 1)
-                        }
-                      />
-                    </div>
                   </div>
 
                   <div className="space-y-2">
@@ -288,18 +351,19 @@ const PaperTrading = () => {
                         <SelectValue placeholder="Select expiry" />
                       </SelectTrigger>
                       <SelectContent>
-                        {instrumentData.expiries.map((exp) => (
-                          <SelectItem key={exp} value={exp}>
-                            {exp}
-                          </SelectItem>
-                        ))}
+                        {expiries.length > 0 &&
+                          expiries?.map((exp, index) => (
+                            <SelectItem key={exp} value={exp}>
+                              {exp}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </div>
 
                   {selectedExpiry && (
-                    <div className="border rounded-lg overflow-hidden">
-                      <Table>
+                    <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
+                      <Table className="max-h-40">
                         <TableHeader>
                           <TableRow>
                             <TableHead>Strike</TableHead>
@@ -308,132 +372,135 @@ const PaperTrading = () => {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {optionsChain.slice(0, 10).map((row) => {
-                            const callSelected = positions.find(
-                              (p) =>
-                                p.type === "option" &&
-                                p.strike === row.strike &&
-                                p.expiry === selectedExpiry &&
-                                p.optionType === "CE"
-                            );
-                            const putSelected = positions.find(
-                              (p) =>
-                                p.type === "option" &&
-                                p.strike === row.strike &&
-                                p.expiry === selectedExpiry &&
-                                p.optionType === "PE"
-                            );
-                            const rowHighlight = callSelected || putSelected;
+                          {optionChain &&
+                            optionChain.map((row: any, index) => {
+                              // console.log(row);
+                              // const callSelected = positions.find(
+                              //   (p) =>
+                              //     p.strike === row.strike &&
+                              //     p.expiry === selectedExpiry &&
+                              //     p.optionType === "CE"
+                              // );
+                              // const putSelected = positions.find(
+                              //   (p) =>
+                              //     p.type === "option" &&
+                              //     p.strike === row.strike &&
+                              //     p.expiry === selectedExpiry &&
+                              //     p.optionType === "PE"
+                              // );
+                              // const rowHighlight = callSelected || putSelected;
 
-                            return (
-                              <TableRow
-                                key={row.strike}
-                                className={
-                                  rowHighlight
-                                    ? rowHighlight.action === "BUY"
-                                      ? "bg-success/10"
-                                      : "bg-danger/10"
-                                    : ""
-                                }
-                              >
-                                <TableCell className="font-medium">
-                                  {row.strike}
-                                </TableCell>
-                                <TableCell
-                                  className={
-                                    callSelected
-                                      ? callSelected.action === "BUY"
-                                        ? "bg-success/20"
-                                        : "bg-danger/20"
-                                      : ""
-                                  }
+                              return (
+                                <TableRow
+                                  key={index}
+                                  // className={
+                                  //   rowHighlight
+                                  //     ? rowHighlight.action === "BUY"
+                                  //       ? "bg-success/10"
+                                  //       : "bg-danger/10"
+                                  //     : ""
+                                  // }
                                 >
-                                  <div className="space-y-1">
-                                    <div className="text-sm">
-                                      ₹{row.callLTP}
+                                  <TableCell className="font-medium">
+                                    {row.strike}
+                                  </TableCell>
+                                  <TableCell
+                                  // className={
+                                  //   callSelected
+                                  //     ? callSelected.action === "BUY"
+                                  //       ? "bg-success/20"
+                                  //       : "bg-danger/20"
+                                  //     : ""
+                                  // }
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="text-sm">
+                                        ₹{row.callLTP}
+                                      </div>
+                                      <div className="flex gap-1">
+                                        <Button
+                                          size="sm"
+                                          variant="default"
+                                          className="h-6 text-xs px-2"
+                                          onClick={() =>
+                                            executeOptionTrade(
+                                              row.strike,
+                                              selectedExpiry,
+                                              "CE",
+                                              "BUY"
+                                            )
+                                          }
+                                        >
+                                          B
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          className="h-6 text-xs px-2"
+                                          onClick={() =>
+                                            executeOptionTrade(
+                                              row.strike,
+                                              selectedExpiry,
+                                              "CE",
+                                              "SELL"
+                                            )
+                                          }
+                                        >
+                                          S
+                                        </Button>
+                                      </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                      <Button
-                                        size="sm"
-                                        variant="default"
-                                        className="h-6 text-xs px-2"
-                                        onClick={() =>
-                                          executeOptionTrade(
-                                            row.strike,
-                                            selectedExpiry,
-                                            "CE",
-                                            "BUY"
-                                          )
-                                        }
-                                      >
-                                        B
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        className="h-6 text-xs px-2"
-                                        onClick={() =>
-                                          executeOptionTrade(
-                                            row.strike,
-                                            selectedExpiry,
-                                            "CE",
-                                            "SELL"
-                                          )
-                                        }
-                                      >
-                                        S
-                                      </Button>
+                                  </TableCell>
+                                  <TableCell
+                                  // className={
+                                  //   putSelected
+                                  //     ? putSelected.action === "BUY"
+                                  //       ? "bg-success/20"
+                                  //       : "bg-danger/20"
+                                  //     : ""
+                                  // }
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="text-sm">
+                                        ₹{row.putLTP}
+                                      </div>
+                                      <div className="flex gap-1">
+                                        <Button
+                                          size="sm"
+                                          variant="default"
+                                          className="h-6 text-xs px-2"
+                                          onClick={() =>
+                                            executeOptionTrade(
+                                              row.strike,
+                                              selectedExpiry,
+                                              "PE",
+                                              "BUY"
+                                            )
+                                          }
+                                        >
+                                          B
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="destructive"
+                                          className="h-6 text-xs px-2"
+                                          onClick={() =>
+                                            executeOptionTrade(
+                                              row.strike,
+                                              selectedExpiry,
+                                              "PE",
+                                              "SELL"
+                                            )
+                                          }
+                                        >
+                                          S
+                                        </Button>
+                                      </div>
                                     </div>
-                                  </div>
-                                </TableCell>
-                                <TableCell
-                                  className={
-                                    putSelected
-                                      ? putSelected.action === "BUY"
-                                        ? "bg-success/20"
-                                        : "bg-danger/20"
-                                      : ""
-                                  }
-                                >
-                                  <div className="space-y-1">
-                                    <div className="text-sm">₹{row.putLTP}</div>
-                                    <div className="flex gap-1">
-                                      <Button
-                                        size="sm"
-                                        variant="default"
-                                        className="h-6 text-xs px-2"
-                                        onClick={() =>
-                                          executeOptionTrade(
-                                            row.strike,
-                                            selectedExpiry,
-                                            "PE",
-                                            "BUY"
-                                          )
-                                        }
-                                      >
-                                        B
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        className="h-6 text-xs px-2"
-                                        onClick={() =>
-                                          executeOptionTrade(
-                                            row.strike,
-                                            selectedExpiry,
-                                            "PE",
-                                            "SELL"
-                                          )
-                                        }
-                                      >
-                                        S
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
                         </TableBody>
                       </Table>
                     </div>

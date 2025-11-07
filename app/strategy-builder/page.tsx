@@ -46,7 +46,7 @@ interface SelectedOption {
   action: "BUY" | "SELL";
   premium: number;
   quantity: number;
-  expiry: Date;
+  expiry: string; // <- changed to string
 }
 
 const StrategyBuilder = () => {
@@ -112,17 +112,18 @@ const StrategyBuilder = () => {
 
     console.log(data);
 
-    const premium = type === "CE" ? data?.CE.lastPrice : data?.PE.lastPrice;
+    const premium = Number(
+      type === "CE" ? data?.CE.lastPrice : data?.PE.lastPrice
+    );
 
     const newOption: SelectedOption = {
-      //   id: `${Date.now()}-${Math.random()}`,
       id: Math.random().toString(),
       strike,
       type,
       action,
       premium,
       quantity: 1,
-      expiry: data.expiryDate,
+      expiry: String(data.expiryDate), // force string
     };
 
     setSelectedOptions([...selectedOptions, newOption]);
@@ -176,9 +177,49 @@ const StrategyBuilder = () => {
         );
         const json = await res.json();
         if (json.success) {
-          setOptionData(json.data);
-          console.log(json.data[0].CE.underlyingValue);
-          setspotPrice(json.data[0].CE.underlyingValue);
+          // Filter only rows that have all required fields
+          const filtered = (json.data || []).filter(
+            (row: any) =>
+              row &&
+              row.strikePrice != null &&
+              row.CE &&
+              row.PE &&
+              typeof row.CE.lastPrice !== "undefined" &&
+              typeof row.PE.lastPrice !== "undefined"
+          );
+
+          // Normalize numeric fields
+          const normalized = filtered.map((row: any) => ({
+            ...row,
+            CE: {
+              ...row.CE,
+              lastPrice: Number(row.CE.lastPrice) || 0,
+              underlyingValue: Number(row.CE.underlyingValue) || null,
+            },
+            PE: {
+              ...row.PE,
+              lastPrice: Number(row.PE.lastPrice) || 0,
+            },
+            strikePrice: Number(row.strikePrice) || 0,
+          }));
+
+          // Only set option data if we have something valid
+          if (normalized.length > 0) {
+            setOptionData(normalized);
+
+            // Try to extract a reliable spot price:
+            // Prefer CE.underlyingValue (if valid), else average of first few valid ones.
+            const validSpots = normalized
+              .map((r: any) => r.CE?.underlyingValue)
+              .filter((v: any) => typeof v === "number" && !isNaN(v));
+
+            if (validSpots.length > 0) {
+              // Use median instead of random index (more robust)
+              const sorted = [...validSpots].sort((a, b) => a - b);
+              const mid = sorted[Math.floor(sorted.length / 2)];
+              setspotPrice(mid);
+            }
+          }
         }
       } catch (err) {
         console.error("Error fetching option data:", err);
