@@ -67,11 +67,12 @@ const PaperTrading = () => {
   const [orderHistory, setOrderHistory] = useState<Trade[]>([]);
   const [optionChain, setOptionChain] = useState<any[]>([]);
 
-  // Option trading state
   const [selectedInstrument, setSelectedInstrument] = useState("NIFTY");
   const [instruments, setInstruments] = useState<String[]>([]);
   const [expiries, setExpiries] = useState<any[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState("");
+  const [allLtps, setAllLtps] = useState<any[]>([]);
+  const [strikesData, setStrikesData] = useState<any>({});
 
   useEffect(() => {
     const getInstruments = async () => {
@@ -132,14 +133,43 @@ const PaperTrading = () => {
 
     const middle100 = mergedArray.slice(start, end);
 
-    console.log(middle100);
+    // console.log(middle100);
     setOptionChain(middle100);
-
-    // If you want the merged one in state, use this:
-    // setOptionChain(mergedArray);
   }, [selectedExpiry]);
 
+  useEffect(() => {
+    if (optionChain) {
+      const ceTokens = optionChain.map((d) => `NFO|${d.CE.token}`);
+      const peTokens = optionChain.map((d) => `NFO|${d.PE.token}`);
+      const allTokens = [...ceTokens, ...peTokens];
+      setAllLtps(allTokens);
+    }
+  }, [optionChain]);
+
+  useEffect(() => {
+    const es = new EventSource(`/api/test?strikes=${allLtps}`);
+
+    es.onmessage = (event) => {
+      const tick = JSON.parse(event.data);
+      if (["tk", "tf", "dk"].includes(tick.t)) {
+        setStrikesData((prev: any) => ({
+          ...prev,
+          [tick.tk]: tick,
+        }));
+      }
+    };
+
+    es.onerror = (err) => {
+      console.log("SSE error:", err);
+      es.close();
+    };
+
+    return () => es.close();
+  }, [allLtps]);
+
   const [quantity, setQuantity] = useState(1);
+
+  const tickList = Object.values(strikesData);
 
   // Stock trading state
   const [stockSymbol, setStockSymbol] = useState("");
@@ -362,7 +392,7 @@ const PaperTrading = () => {
                   </div>
 
                   {selectedExpiry && (
-                    <div className="border rounded-lg overflow-hidden max-h-80 overflow-y-auto">
+                    <div className="border rounded-lg max-h-80 overflow-y-scroll">
                       <Table className="max-h-40">
                         <TableHeader>
                           <TableRow>
@@ -374,7 +404,6 @@ const PaperTrading = () => {
                         <TableBody>
                           {optionChain &&
                             optionChain.map((row: any, index) => {
-                              // console.log(row);
                               // const callSelected = positions.find(
                               //   (p) =>
                               //     p.strike === row.strike &&
@@ -415,7 +444,13 @@ const PaperTrading = () => {
                                   >
                                     <div className="space-y-1">
                                       <div className="text-sm">
-                                        ₹{row.callLTP}
+                                        ₹
+                                        {
+                                          tickList.find(
+                                            (data: any) =>
+                                              data.tk === row.CE.token
+                                          )?.lp
+                                        }
                                       </div>
                                       <div className="flex gap-1">
                                         <Button
@@ -462,7 +497,13 @@ const PaperTrading = () => {
                                   >
                                     <div className="space-y-1">
                                       <div className="text-sm">
-                                        ₹{row.putLTP}
+                                        ₹
+                                        {
+                                          tickList.find(
+                                            (data: any) =>
+                                              data.tk === row.PE.token
+                                          )?.lp
+                                        }
                                       </div>
                                       <div className="flex gap-1">
                                         <Button

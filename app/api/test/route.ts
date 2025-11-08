@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import WebSocket from "ws";
-import { getAllIndexTokens } from "@/lib/shoonyaMaster";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,29 +9,45 @@ export const revalidate = 0;
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
-  // console.log(url);
+  const strikesParam = url.searchParams.get("strikes");
 
-  const strikes = url.searchParams.get("strikes");
-  // const niftyTokens = ["NFO|40083", "NFO|40085", "NFO|40079", "NFO|40093"];
+  if (!strikesParam) {
+    return new Response(
+      `data: ${JSON.stringify({ error: "Missing strikes parameter" })}\n\n`,
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      }
+    );
+  }
 
-  console.log(strikes?.toString());
+  // Split and trim tokens
+  const tokens = strikesParam
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
 
-  const niftyTokens = strikes?.split(",");
+  if (tokens.length === 0) {
+    return new Response("No valid tokens found", { status: 400 });
+  }
 
   const encoder = new TextEncoder();
 
-  // await getAllIndexTokens();
-
   const stream = new ReadableStream({
     start(controller) {
-      console.log("🚀 Stream started");
+      console.log("Stream started with tokens:", tokens);
 
       const ws = new WebSocket("wss://api.shoonya.com/NorenWSTP/");
-      let isClosed = false;
+      let closed = false;
 
       const safeClose = () => {
-        if (!isClosed) {
-          isClosed = true;
+        if (!closed) {
+          closed = true;
           try {
             controller.close();
           } catch {}
@@ -40,7 +55,7 @@ export async function GET(req: NextRequest) {
       };
 
       ws.on("open", () => {
-        console.log("✅ WS open, sending auth");
+        console.log("WS open, sending auth...");
         ws.send(
           JSON.stringify({
             t: "c",
@@ -54,30 +69,23 @@ export async function GET(req: NextRequest) {
 
       ws.on("message", (msg) => {
         const data = JSON.parse(msg.toString());
-        // console.log("📨 WS message:", data);
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 
         if (data.t === "ck" && data.s === "OK") {
-          console.log("🔐 Auth success");
-          setTimeout(() => {
-            const tokenString = niftyTokens.join("#");
-            console.log("📡 Subscribing to:", tokenString);
-            ws.send(JSON.stringify({ t: "t", k: tokenString }));
-          }, 1000);
-        }
+          console.log("Auth success, subscribing...");
 
-        if (data.t === "tk") {
-          console.log("📊 Tick received:", data);
+          const joinString = tokens.join("#");
+          ws.send(JSON.stringify({ t: "t", k: joinString }));
         }
       });
 
       ws.on("error", (err) => {
-        console.error("⚠️ WS error:", err);
+        console.error("WS error", err);
         safeClose();
       });
 
       ws.on("close", () => {
-        console.log("❌ WS closed");
+        console.log("WS closed");
         safeClose();
       });
     },
@@ -88,7 +96,7 @@ export async function GET(req: NextRequest) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      "X-Accel-Buffering": "no", // 🚀 disables buffering in Vercel/Nginx
+      "X-Accel-Buffering": "no",
     },
   });
 }

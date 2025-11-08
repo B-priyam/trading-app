@@ -6,6 +6,14 @@ export default function NiftyStream() {
   const [ticks, setTicks] = useState<any>({});
   const [strikes, setStrikes] = useState([]);
 
+  useEffect(() => {
+    const login = async () => {
+      const res = await fetch("/api/login");
+      const data = await res.json();
+    };
+    login();
+  }, []);
+
   // useEffect(() => {
   //   const get = async () => {
   //     const res = await fetch("/api/option-chain?index=NIFTY");
@@ -40,23 +48,23 @@ export default function NiftyStream() {
 
   const tickList = Object.values(ticks);
 
-  useEffect(() => {
-    const test = async () => {
-      const res = await fetch("/all_indices_tokens.json");
-      // console.log(res);
-      const data = await res.json();
-      setStrikes(
-        data["NIFTY"]["CE"]
-          .filter(
-            (x: any) =>
-              (x.strike == "25350" && x.expiry === "2025-11-11") ||
-              (x.strike == "25250" && x.expiry === "2025-11-11")
-          )
-          .map((item: any) => `NFO|${item.token}`)
-      );
-    };
-    test();
-  }, []);
+  // useEffect(() => {
+  //   const test = async () => {
+  //     const res = await fetch("/all_indices_tokens.json");
+  //     // console.log(res);
+  //     const data = await res.json();
+  //     setStrikes(
+  //       data["NIFTY"]["CE"]
+  //         .filter(
+  //           (x: any) =>
+  //             (x.strike == "25350" && x.expiry === "2025-11-11") ||
+  //             (x.strike == "25250" && x.expiry === "2025-11-11")
+  //         )
+  //         .map((item: any) => `NFO|${item.token}`)
+  //     );
+  //   };
+  //   test();
+  // }, []);
 
   // console.log(strikes);
 

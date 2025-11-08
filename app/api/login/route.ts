@@ -4,12 +4,12 @@ import { NextResponse } from "next/server";
 
 const BASE_URL = "https://api.shoonya.com/NorenWClientTP/";
 
-export async function POST() {
+export async function GET() {
   try {
     const payload = JSON.stringify({
       uid: "FA294062",
       pwd: "8c346175e7d9721076f3230af2b1b09a0dfcb5c2932ae5f56fdd9919e54b6cd7",
-      factor2: "378625",
+      factor2: "140385",
       imei: "abc1234",
       apkversion: "1.0.0",
       vc: "FA294062_U",
